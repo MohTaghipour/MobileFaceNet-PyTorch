@@ -4,11 +4,12 @@ import torch
 import numpy as np
 import re
 import matplotlib.pyplot as plt
+import seaborn as sns
 from PIL import Image
 import model
-from LFW_loader import LFW
+from Loaders.LFW_loader import LFW
 from config import LFW_ALIGNED_DATA_DIR
-from eval import parseList, getThreshold
+from eval import parse_lfw_pairs, getThreshold
 
 def find_best_checkpoint(log_file='train.log', ckpt_dir='your_save_dir_here'):
     best_acc = 0.0
@@ -53,7 +54,7 @@ def extract_features(model_path, lfw_dir, batch_size=128):
     net.load_state_dict(ckpt['net_state_dict'])
     net.eval()
 
-    nl, nr, folds, flags = parseList(lfw_dir)
+    nl, nr, folds, flags = parse_lfw_pairs(lfw_dir)
     dataset = LFW(nl, nr)
     loader = torch.utils.data.DataLoader(dataset,batch_size=batch_size,
         shuffle=False, num_workers=8, drop_last=False)
@@ -149,11 +150,47 @@ def display_wrong_pairs(indices, nl, nr, scores, kind="FN", max_show=16):
     plt.subplots_adjust(left=0.02,right=0.98,top=0.90,bottom=0.05,hspace=0.25,wspace=0.05)
     plt.show()
 
+def plot_confusion_matrix_seaborn(cm):
+    labels = ["SAME", "DIFF"]
+    plt.figure(figsize=(5.5, 4.5))
+    sns.heatmap(cm,annot=True,fmt="d",cmap="Blues",xticklabels=labels,
+        yticklabels=labels,cbar=False,annot_kws={"fontsize": 12})
+    plt.xlabel("Predicted", fontsize=12)
+    plt.ylabel("Actual", fontsize=12)
+    plt.title("LFW Confusion Matrix (10-fold)", fontsize=14)
+    plt.tight_layout()
+    plt.show()
+
+def compute_confusion_matrix_10fold(fl, fr, folds, flags, plot=True):
+    scores = np.sum(fl * fr, axis=1)
+    scores = np.clip(scores, -1.0, 1.0)
+    TP = TN = FP = FN = 0
+    for i in range(10):
+        val_mask = folds != i
+        test_mask = folds == i
+        threshold = getThreshold(scores[val_mask], flags[val_mask], 10000)
+        test_scores = scores[test_mask]
+        test_flags = flags[test_mask] > 0   # ground truth SAME / DIFF
+        preds_same = test_scores > threshold
+        TP += np.sum((test_flags == 1) & (preds_same == 1))
+        FN += np.sum((test_flags == 1) & (preds_same == 0))
+        FP += np.sum((test_flags == 0) & (preds_same == 1))
+        TN += np.sum((test_flags == 0) & (preds_same == 0))
+    cm = np.array([[TP, FN],[FP, TN]])
+    print("\nConfusion Matrix (LFW, 10-fold aggregated):")
+    print("             Pred SAME   Pred DIFF")
+    print(f"Actual SAME     {TP:5d}       {FN:5d}")
+    print(f"Actual DIFF     {FP:5d}       {TN:5d}")
+    acc = (TP + TN) / np.sum(cm) * 100
+    print(f"Verification Accuracy from CM: {acc:.3f}%")
+    if plot:
+        plot_confusion_matrix_seaborn(cm)
+    return cm
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Analyze wrong LFW pairs using best model")
-    parser.add_argument('--log_file', type=str, default='./results/CASIA_20251220_101904/train.log', help='Path to training log')
-    parser.add_argument('--ckpt_dir', type=str, default='./results/CASIA_20251220_101904', help='Directory containing .ckpt files')
+    parser.add_argument('--log_file', type=str, default='./results/CASIA_20251225_122726/train.log', help='Path to training log')
+    parser.add_argument('--ckpt_dir', type=str, default='./results/CASIA_20251225_122726', help='Directory containing .ckpt files')
     parser.add_argument('--lfw_dir', type=str, default=LFW_ALIGNED_DATA_DIR)
     parser.add_argument('--max_show', type=int, default=20, help='Max wrong pairs to display')
     args = parser.parse_args()
@@ -168,3 +205,5 @@ if __name__ == '__main__':
     else: print("Perfect! No false negatives found.")
     if len(false_positives) > 0: display_wrong_pairs(false_positives, nl, nr, scores, kind="FP")
     else: print("Perfect! No false negatives found.")
+    # Step 5: Confusion Matrix
+    cm = compute_confusion_matrix_10fold(fl, fr, folds, flags, plot=True)

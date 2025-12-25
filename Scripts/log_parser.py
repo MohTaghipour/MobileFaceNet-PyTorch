@@ -41,7 +41,7 @@ def parse_log_file(log_path):
 
 if __name__ == '__main__':
     
-    log_file = './results/CASIA_20251220_101904/train.log'
+    log_file = './results/CASIA_20251225_122726/train.log'
     epochs, losses, mean_accs, std_accs = parse_log_file(log_file)
 
     # Filter evaluated epochs

@@ -14,6 +14,7 @@ dependencies:
   - pillow
   - opencv
   - matplotlib
+  - seaborn
   - tqdm
   - pip
   - pip:

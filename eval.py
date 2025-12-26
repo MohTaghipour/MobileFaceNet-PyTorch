@@ -4,6 +4,7 @@ import csv
 import os
 import torch
 from torch.utils.data import DataLoader
+import torch.nn.functional as F
 import model
 from Loaders.LFW_loader import LFW
 from config import LFW_ALIGNED_DATA_DIR
@@ -90,42 +91,36 @@ def extract_features(dataset_pairs, batch_size=32, resume=None, gpu=True):
     device = torch.device('cuda' if gpu and torch.cuda.is_available() else 'cpu')
     nl, nr, folds, flags = dataset_pairs
     dataset = LFW(nl, nr)
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=8, drop_last=False)
-
+    loader = DataLoader(dataset, batch_size=batch_size,
+                        shuffle=False, num_workers=8, drop_last=False)
     net = model.MobileFacenet().to(device)
     if resume:
         ckpt = torch.load(resume, map_location=device)
         net.load_state_dict(ckpt['net_state_dict'])
     net.eval()
-
     featureLs, featureRs = [], []
     with torch.no_grad():
-        for i, data in enumerate(loader):
-            # Move batch to device
-            data = [d.to(device) for d in data]
-            # Compute embeddings
-            res = [net(d).cpu().numpy() for d in data]
-            # Concatenate pairwise features
-            featureL = np.concatenate((res[0], res[1]), axis=1)
-            featureR = np.concatenate((res[2], res[3]), axis=1)
-            featureLs.append(featureL)
-            featureRs.append(featureR)
-            print(f"Processed batch {i+1}/{len(loader)}...")
+        for left, right in loader:   # ← مهم
+            left = left.to(device)
+            right = right.to(device)
+
+            embL = F.normalize(net(left), dim=1).cpu().numpy()
+            embR = F.normalize(net(right), dim=1).cpu().numpy()
+
+            featureLs.append(embL)
+            featureRs.append(embR)
 
     featureLs = np.concatenate(featureLs, axis=0)
     featureRs = np.concatenate(featureRs, axis=0)
-    # Trim folds and flags to match the number of extracted embeddings
-    num_samples = featureLs.shape[0]
-    folds = np.array(folds[:num_samples])
-    flags = np.array(flags[:num_samples])
+    folds = np.asarray(folds)
+    flags = np.asarray(flags)
     return featureLs, featureRs, folds, flags
-
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Face verification evaluation")
     parser.add_argument('--lfw_dir', type=str, default=LFW_ALIGNED_DATA_DIR)
-    parser.add_argument('--resume', type=str, default='./results/CASIA_20251220_101904/024.ckpt', help='Path to trained model checkpoint')
+    parser.add_argument('--resume', type=str, default='./results/CASIA_20251225_122726/024.ckpt', help='Path to trained model checkpoint')
     parser.add_argument('--batch_size', type=int, default=512)
     args = parser.parse_args()
     pairs = parse_lfw_pairs(args.lfw_dir)

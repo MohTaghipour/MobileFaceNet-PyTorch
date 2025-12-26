@@ -87,12 +87,12 @@ def evaluation_10_fold(featureLs, featureRs, fold, flags):
         ACCs[i] = getAccuracy(scores[testFold], flags[testFold], threshold)
     return ACCs
 
-def extract_features(dataset_pairs, batch_size=32, resume=None, gpu=True):
+def extract_features(dataset_pairs, batch_size=512, resume=None, gpu=True):
     device = torch.device('cuda' if gpu and torch.cuda.is_available() else 'cpu')
     nl, nr, folds, flags = dataset_pairs
     dataset = LFW(nl, nr)
     loader = DataLoader(dataset, batch_size=batch_size,
-                        shuffle=False, num_workers=8, drop_last=False)
+                        shuffle=False, num_workers=8)
     net = model.MobileFacenet().to(device)
     if resume:
         ckpt = torch.load(resume, map_location=device)
@@ -100,20 +100,19 @@ def extract_features(dataset_pairs, batch_size=32, resume=None, gpu=True):
     net.eval()
     featureLs, featureRs = [], []
     with torch.no_grad():
-        for left, right in loader:   # ← مهم
-            left = left.to(device)
-            right = right.to(device)
-
-            embL = F.normalize(net(left), dim=1).cpu().numpy()
-            embR = F.normalize(net(right), dim=1).cpu().numpy()
-
-            featureLs.append(embL)
-            featureRs.append(embR)
+        for batch in loader:
+            batch = batch.to(device)          # (B, 2, 3, 112, 112)
+            img_l = batch[:, 0]               # (B, 3, 112, 112)
+            img_r = batch[:, 1]
+            emb_l = F.normalize(net(img_l), dim=1)
+            emb_r = F.normalize(net(img_r), dim=1)
+            featureLs.append(emb_l.cpu().numpy())
+            featureRs.append(emb_r.cpu().numpy())
 
     featureLs = np.concatenate(featureLs, axis=0)
     featureRs = np.concatenate(featureRs, axis=0)
-    folds = np.asarray(folds)
-    flags = np.asarray(flags)
+    folds = np.asarray(folds[:len(featureLs)])
+    flags = np.asarray(flags[:len(featureLs)])
     return featureLs, featureRs, folds, flags
 
 if __name__ == "__main__":
